@@ -1,6 +1,10 @@
 import pandas as pd
 import numpy as np
 
+from convscript.audio_utils import download_mp3, transform_mp3_to_wav, crop_wav
+from convscript.model_whisper import whisper_inference_with_segments_df
+from convscript.model_pyannote import get_pyannote_access_token, pyannote_inference_df
+
 def combine_whisper_and_pyannote(text_df, speaker_df):
     
     # find overlapping speakers for each text segment
@@ -82,3 +86,53 @@ def text_speaker_df_to_text(text_speaker_df):
         
     return output_str
 
+def wav_to_transcript(wav_fname, model_type, pyannote_token):
+    
+    text_df = whisper_inference_with_segments_df(wav_fname, model_type=model_type)
+    text_df = text_df.reset_index()
+    
+    speaker_df = pyannote_inference_df(wav_fname, pyannote_token)
+    print('done')
+    
+    text_speaker_df_raw = combine_whisper_and_pyannote(text_df, speaker_df)    
+    text_speaker_df = combine_consecutive_speakers(text_speaker_df_raw)
+    output_str = text_speaker_df_to_text(text_speaker_df)
+    
+    return output_str
+
+def url_to_transcript(url, model_type, pyannote_token):
+
+    ## download file, transform to wav
+    mp3_fname = download_mp3(url)
+    wav_fname = transform_mp3_to_wav(mp3_fname)
+    print('TODO: remove file cropping in url_to_transcript')
+    crop_wav(wav_fname, wav_fname, start_frame=100000, n_frames=60000)
+    
+    text_df = whisper_inference_with_segments_df(wav_fname, model_type=model_type)
+    text_df = text_df.reset_index()
+    
+    speaker_df = pyannote_inference_df(wav_fname, pyannote_token)
+    print('done')
+    
+    text_speaker_df_raw = combine_whisper_and_pyannote(text_df, speaker_df)    
+    text_speaker_df = combine_consecutive_speakers(text_speaker_df_raw)
+    output_str = text_speaker_df_to_text(text_speaker_df)
+    
+    return output_str
+
+
+if __name__ == '__main__':
+    
+    import os
+    from dotenv import load_dotenv
+    from convscript.path import ProjPaths
+
+    dotenv_path = ProjPaths.env_variables_path
+    load_dotenv(dotenv_path)
+    pyannote_token = os.environ.get('PYANNOTE_ACCESS_TOKEN')
+
+    test_url = 'https://chtbl.com/track/736CG3/pdst.fm/e/stitcher.simplecastaudio.com/2be48404-a43c-4fa8-a32c-760a3216272e/episodes/413d1340-d75e-46ae-956c-3785e2b359b2/audio/128/default.mp3?aid=rss_feed&amp;awCollectionId=2be48404-a43c-4fa8-a32c-760a3216272e&amp;awEpisodeId=413d1340-d75e-46ae-956c-3785e2b359b2&amp;feed=Y8lFbOT4'
+    
+    output_str = url_to_transcript(test_url, 'base', pyannote_token)
+    output_str
+    

@@ -7,7 +7,6 @@ import numpy as np
 
 def get_pyannote_access_token(dotenv_path):
 
-    
     load_dotenv(dotenv_path)
     pyannote_token = os.environ.get('PYANNOTE_ACCESS_TOKEN')
 
