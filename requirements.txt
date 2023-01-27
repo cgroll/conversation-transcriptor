@@ -1,3 +1,6 @@
+# local package
+-e .
+
 pyaudio
 wave
 git+https://github.com/openai/whisper.git
