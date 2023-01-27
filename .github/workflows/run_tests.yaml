@@ -26,5 +26,7 @@ jobs:
           pip install pytest
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
       - name: Test with pytest
+        env:
+          PYANNOTE_ACCESS_TOKEN: ${{ secrets.PYANNOTE_ACCESS_TOKEN }}
         run: |
           pytest
