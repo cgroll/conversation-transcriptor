@@ -17,3 +17,4 @@ test/__pycache__/test_transcription.cpython-310-pytest-7.2.1.pyc
 test/__pycache__/test_url_wav.cpython-310-pytest-7.2.1.pyc
 test/__pycache__/test_utils.cpython-310-pytest-7.2.1.pyc
 test/__pycache__/test_whisper.cpython-310-pytest-7.2.1.pyc
+.env

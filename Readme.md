@@ -24,6 +24,13 @@ The easiest way to access the tool is by:
 - using the Google Colab notebook
 
 
+## Installation
+
+In order to use the click command app, the package needs to be installed locally with:
+
+```
+pip install --editable .
+```
 
 
 
