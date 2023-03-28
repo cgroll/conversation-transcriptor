@@ -1,6 +1,6 @@
 # Conversation transcriptor
 
-This is a tool that let's you extract a converation in an audio file into a transcription text.
+This is a tool that let's you extract a conversation in an audio file into a transcription text.
 
 ## Transcription model
 
@@ -33,5 +33,20 @@ pip install --editable .
 ```
 
 
+## Application with Click
 
+To see a list of available click commands, use:
+```
+python click_app.py --help
+```
+
+To see more details about a given click command, use e.g.:
+```
+python click_app.py click-wav-to-transcript --help
+```
+
+Alternatively, commands are also listed with shortcuts in `setup.py`. E.g.:
+```
+from_wav --help
+```
 

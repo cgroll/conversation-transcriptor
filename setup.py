@@ -10,8 +10,8 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'from_wav = click_app:wav_to_transcript',
-            'from_url = click_app:url_to_transcript',
+            'from_wav = click_app:click_wav_to_transcript',
+            'from_url = click_app:click_url_to_transcript',
         ],
     },
     description='Some speech-to-text python experiments',
