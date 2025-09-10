@@ -1,9 +1,12 @@
 import pandas as pd
 import numpy as np
+import time
+import os
 
 from convscript.audio_utils import download_mp3, transform_mp3_to_wav, crop_wav
 from convscript.model_whisper import whisper_inference_with_segments_df
 from convscript.model_pyannote import get_pyannote_access_token, pyannote_inference_df
+from convscript.path import ProjPaths
 
 def combine_whisper_and_pyannote(text_df, speaker_df):
     
@@ -57,14 +60,21 @@ def combine_consecutive_speakers(text_speaker_df_raw):
             
             new_start = text_speaker_df['start'].iloc[counter-1]
             previous_text = text_speaker_df['text'].iloc[counter-1]
-            new_text = previous_text + ' ' + text_speaker_df['text'].iloc[counter]
+            current_text = text_speaker_df['text'].iloc[counter]
+            
+            # Handle NaN values in text columns
+            previous_text = str(previous_text) if pd.notna(previous_text) else ""
+            current_text = str(current_text) if pd.notna(current_text) else ""
+            
+            new_text = previous_text + ' ' + current_text
             
             text_speaker_df['start'].iloc[counter] = new_start
             text_speaker_df['text'].iloc[counter] = new_text
             text_speaker_df['start'].iloc[counter-1] = np.nan
             text_speaker_df['end'].iloc[counter-1] = np.nan
         
-    text_speaker_df = text_speaker_df.dropna().loc[:, ['start', 'end', 'text', 'speaker']]
+    # Only drop rows where start or end is NaN (these are the ones we marked for removal)
+    text_speaker_df = text_speaker_df.dropna(subset=['start', 'end']).loc[:, ['start', 'end', 'text', 'speaker']]
     text_speaker_df = text_speaker_df.reset_index(drop=True)
     text_speaker_df = text_speaker_df.sort_values('start')
     
@@ -86,21 +96,122 @@ def text_speaker_df_to_text(text_speaker_df):
         
     return output_str
 
-def wav_to_transcript(wav_fname, model_type, pyannote_token):
+def save_intermediate_csvs(text_df, speaker_df, wav_fname, model_type):
+    """Save intermediate DataFrames as CSV files"""
+    # Ensure directories exist
+    ProjPaths.create_directories()
     
+    base_name = os.path.splitext(os.path.basename(wav_fname))[0]
+    
+    # Save whisper segments
+    whisper_csv = ProjPaths.intermediate_path / f"{base_name}_whisper_{model_type}_segments.csv"
+    text_df.to_csv(whisper_csv, index=False, encoding='utf-8')
+    
+    # Save speaker segments
+    speaker_csv = ProjPaths.intermediate_path / f"{base_name}_speaker_segments.csv"
+    speaker_df.to_csv(speaker_csv, index=False, encoding='utf-8')
+    
+    return whisper_csv, speaker_csv
+
+def save_final_transcript(output_str, output_filename=None, wav_fname=None, model_type=None):
+    """Save final transcript to outputs folder"""
+    # Ensure directories exist
+    ProjPaths.create_directories()
+    
+    if output_filename:
+        output_file = ProjPaths.outputs_path / f"{output_filename}.txt"
+    else:
+        base_name = os.path.splitext(os.path.basename(wav_fname))[0]
+        output_file = ProjPaths.outputs_path / f"{base_name}_{model_type}_transcript.txt"
+    
+    with open(output_file, 'w', encoding='utf-8') as f:
+        f.write(output_str)
+    
+    return output_file
+
+def get_audio_duration(wav_fname):
+    """Get audio duration in seconds"""
+    try:
+        import librosa
+        duration = librosa.get_duration(filename=wav_fname)
+        return duration
+    except:
+        # Fallback method if librosa not available
+        import wave
+        with wave.open(wav_fname, 'r') as audio_file:
+            frames = audio_file.getnframes()
+            sample_rate = audio_file.getframerate()
+            duration = frames / float(sample_rate)
+            return duration
+
+def detect_device():
+    """Detect if CUDA is available and return device info"""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            device_name = torch.cuda.get_device_name(0)
+            return f"CUDA (GPU: {device_name})"
+        else:
+            return "CPU"
+    except ImportError:
+        return "CPU (torch not available)"
+
+def wav_to_transcript(wav_fname, model_type, pyannote_token, output_filename=None):
+    
+    # Display device information
+    device_info = detect_device()
+    print(f"Processing device: {device_info}")
+    
+    # Get audio duration
+    audio_duration = get_audio_duration(wav_fname)
+    print(f"Audio duration: {audio_duration:.2f} seconds ({audio_duration/60:.2f} minutes)")
+    
+    # Step 1: Whisper inference
+    print(f"Starting Whisper inference with model: {model_type}")
+    whisper_start = time.time()
     text_df = whisper_inference_with_segments_df(wav_fname, model_type=model_type)
     text_df = text_df.reset_index()
+    whisper_time = time.time() - whisper_start
+    print(f"Whisper inference complete. Found {len(text_df)} segments")
     
+    # Step 2: Speaker diarization
+    print("Starting speaker diarization with pyannote")
+    pyannote_start = time.time()
     speaker_df = pyannote_inference_df(wav_fname, pyannote_token)
-    print('done')
+    pyannote_time = time.time() - pyannote_start
+    print(f'Speaker diarization done. Found {len(speaker_df)} speaker segments')
     
+    # Step 3: Combining results
+    print("Combining Whisper and pyannote results")
+    combine_start = time.time()
     text_speaker_df_raw = combine_whisper_and_pyannote(text_df, speaker_df)    
     text_speaker_df = combine_consecutive_speakers(text_speaker_df_raw)
     output_str = text_speaker_df_to_text(text_speaker_df)
+    combine_time = time.time() - combine_start
+    print(f"Combination complete. Final transcript has {len(text_speaker_df)} segments")
+    
+    # Save intermediate CSVs
+    save_intermediate_csvs(text_df, speaker_df, wav_fname, model_type)
+    
+    # Save final transcript
+    output_file = save_final_transcript(output_str, output_filename, wav_fname, model_type)
+    
+    # Display timing and statistics
+    total_time = whisper_time + pyannote_time + combine_time
+    print(f"\\n=== PROCESSING SUMMARY ===")
+    print(f"Processing device: {device_info}")
+    print(f"Audio duration: {audio_duration:.2f} seconds")
+    print(f"Final transcript length: {len(output_str):,} characters")
+    print(f"Whisper inference: {whisper_time:.1f}s")
+    print(f"Speaker diarization: {pyannote_time:.1f}s") 
+    print(f"Combination: {combine_time:.1f}s")
+    print(f"Total processing time: {total_time:.1f}s")
+    print(f"Processing speed: {audio_duration/total_time:.1f}x realtime")
+    print(f"Final transcript saved to: {output_file}")
     
     return output_str
 
-def url_to_transcript(url, model_type, pyannote_token):
+def url_to_transcript(url, model_type, pyannote_token, output_filename=None):
 
     ## download file, transform to wav
     mp3_fname = download_mp3(url)
@@ -108,17 +219,7 @@ def url_to_transcript(url, model_type, pyannote_token):
     print('TODO: remove file cropping in url_to_transcript')
     crop_wav(wav_fname, wav_fname, start_frame=100000, n_frames=60000)
     
-    text_df = whisper_inference_with_segments_df(wav_fname, model_type=model_type)
-    text_df = text_df.reset_index()
-    
-    speaker_df = pyannote_inference_df(wav_fname, pyannote_token)
-    print('done')
-    
-    text_speaker_df_raw = combine_whisper_and_pyannote(text_df, speaker_df)    
-    text_speaker_df = combine_consecutive_speakers(text_speaker_df_raw)
-    output_str = text_speaker_df_to_text(text_speaker_df)
-    
-    return output_str
+    return wav_to_transcript(wav_fname, model_type, pyannote_token, output_filename)
 
 
 if __name__ == '__main__':
