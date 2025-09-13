@@ -155,7 +155,7 @@ def click_url_to_notion(audio_url, source_url, title, model_type, skip_notion):
             
             if page_url:
                 print(f"✅ Successfully uploaded to Notion!")
-                print(f"🔗 Notion page: {page_url}")
+                print(f"🔗 Notion page (Part I if multi-part): {page_url}")
             else:
                 print(f"❌ Failed to upload to Notion")
         else:

@@ -225,7 +225,7 @@ def markdown_to_notion_blocks(content: str) -> List[Dict[str, Any]]:
         content: Plain text content from transcript
         
     Returns:
-        List of Notion block objects
+        List of Notion block objects (no limit applied here)
     """
     if not content.strip():
         return [{
@@ -276,9 +276,89 @@ def markdown_to_notion_blocks(content: str) -> List[Dict[str, Any]]:
     
     return blocks
 
+def split_blocks_into_parts(blocks: List[Dict[str, Any]], max_blocks_per_part: int = 95) -> List[List[Dict[str, Any]]]:
+    """
+    Split blocks into multiple parts to handle Notion's 100-block limit.
+    
+    Args:
+        blocks: List of Notion blocks
+        max_blocks_per_part: Maximum blocks per part (default 95 to leave room for navigation)
+        
+    Returns:
+        List of block lists, one for each part
+    """
+    if len(blocks) <= max_blocks_per_part:
+        return [blocks]
+    
+    parts = []
+    current_part = []
+    
+    for block in blocks:
+        if len(current_part) >= max_blocks_per_part:
+            parts.append(current_part)
+            current_part = []
+        
+        current_part.append(block)
+    
+    # Add remaining blocks
+    if current_part:
+        parts.append(current_part)
+    
+    return parts
+
+def add_navigation_to_parts(parts: List[List[Dict[str, Any]]], page_urls: List[str], base_title: str) -> List[List[Dict[str, Any]]]:
+    """
+    Add navigation links between parts.
+    
+    Args:
+        parts: List of block lists
+        page_urls: List of page URLs (will be filled as pages are created)
+        base_title: Base title for the pages
+        
+    Returns:
+        Updated parts with navigation blocks
+    """
+    if len(parts) <= 1:
+        return parts
+    
+    updated_parts = []
+    
+    for i, part in enumerate(parts):
+        part_num = i + 1
+        updated_part = list(part)  # Copy the part
+        
+        # Add navigation header at the top
+        nav_header = {
+            "object": "block",
+            "type": "paragraph",
+            "paragraph": {"rich_text": [{"type": "text", "text": {"content": f"📄 {base_title} - Part {part_num} of {len(parts)}"}, "annotations": {"bold": True}}]}
+        }
+        updated_part.insert(0, nav_header)
+        
+        # Add navigation footer at the bottom
+        nav_links = []
+        for j in range(len(parts)):
+            if j == i:
+                nav_links.append(f"Part {j+1} (current)")
+            else:
+                # We'll update with actual URLs later
+                nav_links.append(f"Part {j+1}")
+        
+        nav_footer = {
+            "object": "block",
+            "type": "paragraph", 
+            "paragraph": {"rich_text": [{"type": "text", "text": {"content": f"📑 Navigation: {' | '.join(nav_links)}"}}]}
+        }
+        updated_part.append(nav_footer)
+        
+        updated_parts.append(updated_part)
+    
+    return updated_parts
+
 def upload_transcript_to_notion(file_path: str, title: Optional[str] = None, date: Optional[str] = None, url: Optional[str] = None, include_date: bool = True) -> Optional[str]:
     """
     Upload a transcript file to Notion database.
+    Automatically splits long transcripts into multiple pages if needed.
     
     Args:
         file_path: Path to the transcript text file
@@ -288,7 +368,8 @@ def upload_transcript_to_notion(file_path: str, title: Optional[str] = None, dat
         include_date: Whether to try to set a date property (default True). Set False if database has no date property.
         
     Returns:
-        Page URL if successful, None otherwise
+        Page URL of first part if successful, None otherwise. 
+        For multi-part uploads, returns URL of Part I.
     """
     try:
         # Get credentials
@@ -323,100 +404,152 @@ def upload_transcript_to_notion(file_path: str, title: Optional[str] = None, dat
         # Convert content to Notion blocks
         blocks = markdown_to_notion_blocks(content)
         
-        # Build properties for the page
-        properties = {
-            "title": {
-                "title": [
-                    {
-                        "text": {
-                            "content": title
-                        }
-                    }
-                ]
-            }
-        }
-        
-        # Add date property if requested and available
-        if include_date:
-            # Find the correct date property name
-            date_property_name = find_date_property_name()
+        # Check if we need to split into multiple parts
+        if len(blocks) > 95:  # Leave room for navigation
+            print(f"📄 Long transcript detected: {len(blocks)} blocks")
+            print(f"📚 Splitting into multiple parts...")
             
-            if date_property_name:
-                upload_date = date if date else get_today_date()
-                # Ensure date is in proper ISO format
-                try:
-                    from datetime import datetime
-                    # Validate and reformat the date
-                    if upload_date:
-                        parsed_date = datetime.fromisoformat(upload_date)
-                        formatted_date = parsed_date.date().isoformat()
-                        properties[date_property_name] = {
-                            "date": {
-                                "start": formatted_date
-                            }
-                        }
-                        print(f"📅 Using date property: '{date_property_name}' = {formatted_date}")
-                except ValueError as date_error:
-                    print(f"⚠️  Invalid date format '{upload_date}', using today instead")
-                    today = get_today_date()
+            parts = split_blocks_into_parts(blocks, max_blocks_per_part=90)  # Even more conservative
+            print(f"📄 Split into {len(parts)} parts")
+            
+            # Upload all parts
+            page_urls = []
+            for i, part_blocks in enumerate(parts):
+                part_num = i + 1
+                part_title = f"{title} - Part {part_num}"
+                
+                print(f"📤 Uploading Part {part_num}/{len(parts)}: {len(part_blocks)} blocks...")
+                
+                # Add navigation header
+                nav_header = {
+                    "object": "block",
+                    "type": "paragraph",
+                    "paragraph": {"rich_text": [{"type": "text", "text": {"content": f"📄 {title} - Part {part_num} of {len(parts)}"}, "annotations": {"bold": True}}]}
+                }
+                part_blocks.insert(0, nav_header)
+                
+                # Create properties for this part
+                properties = create_page_properties(part_title, date, url, include_date)
+                
+                # Upload this part
+                page_url = create_notion_page(client, database_id, properties, part_blocks, part_title)
+                if page_url:
+                    page_urls.append(page_url)
+                    print(f"✅ Part {part_num} uploaded: {page_url}")
+                else:
+                    print(f"❌ Failed to upload Part {part_num}")
+                    return None
+            
+            if page_urls:
+                print(f"🎉 Successfully uploaded {len(page_urls)} parts!")
+                print(f"🔗 Part I URL: {page_urls[0]}")
+                return page_urls[0]  # Return first part URL
+            else:
+                return None
+        
+        else:
+            # Single page upload
+            print(f"📄 Single page upload: {len(blocks)} blocks")
+            properties = create_page_properties(title, date, url, include_date)
+            return create_notion_page(client, database_id, properties, blocks, title)
+            
+    except Exception as e:
+        print(f"❌ Error uploading transcript to Notion: {e}")
+        return None
+
+def create_page_properties(title: str, date: Optional[str], url: Optional[str], include_date: bool) -> Dict[str, Any]:
+    """
+    Create the properties dictionary for a Notion page.
+    
+    Args:
+        title: Page title
+        date: Optional date
+        url: Optional URL
+        include_date: Whether to include date property
+        
+    Returns:
+        Properties dictionary
+    """
+    properties = {
+        "title": {
+            "title": [
+                {
+                    "text": {
+                        "content": title
+                    }
+                }
+            ]
+        }
+    }
+    
+    # Add date property if requested and available
+    if include_date:
+        date_property_name = find_date_property_name()
+        if date_property_name:
+            upload_date = date if date else get_today_date()
+            try:
+                from datetime import datetime
+                if upload_date:
+                    parsed_date = datetime.fromisoformat(upload_date)
+                    formatted_date = parsed_date.date().isoformat()
                     properties[date_property_name] = {
                         "date": {
-                            "start": today
+                            "start": formatted_date
                         }
                     }
-            else:
-                print("⚠️  No date property found in database, skipping date")
-        
-        # Add URL property if provided
-        if url:
-            url_property_name = find_url_property_name()
-            
-            if url_property_name:
-                properties[url_property_name] = {
-                    "url": url
+                    print(f"📅 Using date property: '{date_property_name}' = {formatted_date}")
+            except ValueError as date_error:
+                print(f"⚠️  Invalid date format '{upload_date}', using today instead")
+                today = get_today_date()
+                properties[date_property_name] = {
+                    "date": {
+                        "start": today
+                    }
                 }
-                print(f"🔗 Using URL property: '{url_property_name}' = {url}")
-            else:
-                print("⚠️  No URL property found in database, skipping URL")
+        else:
+            print("⚠️  No date property found in database, skipping date")
+    
+    # Add URL property if provided
+    if url:
+        url_property_name = find_url_property_name()
+        if url_property_name:
+            properties[url_property_name] = {
+                "url": url
+            }
+            print(f"🔗 Using URL property: '{url_property_name}' = {url}")
+        else:
+            print("⚠️  No URL property found in database, skipping URL")
+    
+    return properties
+
+def create_notion_page(client, database_id: str, properties: Dict[str, Any], blocks: List[Dict[str, Any]], title: str) -> Optional[str]:
+    """
+    Create a single Notion page.
+    
+    Args:
+        client: Notion client
+        database_id: Database ID
+        properties: Page properties
+        blocks: Content blocks
+        title: Page title for logging
         
+    Returns:
+        Page URL if successful, None otherwise
+    """
+    try:
         # Create page in Notion
-        try:
-            new_page = client.pages.create(
-                parent={"database_id": database_id},
-                properties=properties,
-                children=blocks
-            )
-        except Exception as e:
-            # If date property fails, try without it
-            if include_date and ("property" in str(e).lower() or "Date" in str(e)):
-                print(f"⚠️  Property failed, retrying without date properties: {e}")
-                # Remove any properties that might be causing issues
-                properties_to_remove = []
-                for prop_name in properties.keys():
-                    if ('date' in prop_name.lower() or prop_name == 'Date' or 
-                        'url' in prop_name.lower() or prop_name == 'URL'):
-                        properties_to_remove.append(prop_name)
-                
-                for prop_name in properties_to_remove:
-                    properties.pop(prop_name, None)
-                    print(f"   Removed property: {prop_name}")
-                
-                new_page = client.pages.create(
-                    parent={"database_id": database_id},
-                    properties=properties,
-                    children=blocks
-                )
-            else:
-                raise e
+        new_page = client.pages.create(
+            parent={"database_id": database_id},
+            properties=properties,
+            children=blocks
+        )
         
         page_url = new_page.get('url', '')
-        print(f"✅ Successfully uploaded transcript: '{title}'")
-        print(f"🔗 Page URL: {page_url}")
-        
+        print(f"✅ Successfully uploaded: '{title}'")
         return page_url
         
     except Exception as e:
-        print(f"❌ Error uploading transcript to Notion: {e}")
+        print(f"❌ Error creating page '{title}': {e}")
         return None
 
 def upload_all_transcripts_in_directory(directory_path: str = "data/outputs") -> List[str]:
