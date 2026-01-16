@@ -1,0 +1,42 @@
+[project]
+name = "convscript"
+version = "0.1.0"
+description = "Some speech-to-text python experiments"
+authors = [
+    {name = "Christian Groll"}
+]
+license = {text = "MIT"}
+requires-python = ">=3.10,<3.11"
+dependencies = [
+    "pyaudio",
+    "openai-whisper @ git+https://github.com/openai/whisper.git",
+    "pydub",
+    "pandas",
+    "python-dotenv",
+    "pyannote-audio",
+    "click",
+    "pytest",
+    "requests",
+    "notion-client",
+    "librosa",
+]
+
+[project.scripts]
+from_wav = "click_app:click_wav_to_transcript"
+from_url = "click_app:click_url_to_transcript"
+url_to_notion = "click_app:click_url_to_notion"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["convscript"]
+
+[dependency-groups]
+dev = [
+    "ipykernel",
+]

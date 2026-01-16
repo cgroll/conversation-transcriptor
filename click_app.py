@@ -15,20 +15,19 @@ def transcribe():
     pass
 
 @click.command()
-@click.option('--wav_fname', type=click.Path(exists=True), 
-              prompt='Please provide path to WAV file')
-@click.option('--model_type', type=click.Choice(choices=WHISPER_MODELS), 
-              default='large-v3-turbo', prompt='Provide the Whisper model',
+@click.option('--wav_fname', type=click.Path(exists=True), required=True,
+              help='Path to WAV file')
+@click.option('--model_type', type=click.Choice(choices=WHISPER_MODELS),
+              default='large-v3-turbo',
               help='Defines the model type in Whisper')
 @click.option('--output_filename', type=click.STRING,
-              help='Output filename (without .txt extension). If not provided, will be prompted.')
+              help='Output filename (without .txt extension). If not provided, auto-generated.')
 def click_wav_to_transcript(wav_fname, model_type, output_filename):
-    
-    # Prompt for output filename if not provided
+
+    # Auto-generate output filename if not provided
     if not output_filename:
-        default_name = os.path.splitext(os.path.basename(wav_fname))[0] + f"_{model_type}_transcript"
-        output_filename = click.prompt('Output filename (without .txt extension)', 
-                                     default=default_name)
+        output_filename = os.path.splitext(os.path.basename(wav_fname))[0] + f"_{model_type}_transcript"
+        print(f"Using output filename: {output_filename}")
     
     dotenv_path = './.env'
     pyannote_token = get_pyannote_access_token(dotenv_path)
@@ -37,20 +36,19 @@ def click_wav_to_transcript(wav_fname, model_type, output_filename):
 
 
 @click.command()
-@click.option('--url', type=click.STRING, 
-              prompt='Please provide the url to an mp3 file')
-@click.option('--model_type', type=click.Choice(choices=WHISPER_MODELS), 
-              default='large-v3-turbo', prompt='Provide the Whisper model',
+@click.option('--url', type=click.STRING, required=True,
+              help='URL to an mp3 file')
+@click.option('--model_type', type=click.Choice(choices=WHISPER_MODELS),
+              default='large-v3-turbo',
               help='Defines the model type in Whisper')
 @click.option('--output_filename', type=click.STRING,
-              help='Output filename (without .txt extension). If not provided, will be prompted.')
+              help='Output filename (without .txt extension). If not provided, auto-generated.')
 def click_url_to_transcript(url, model_type, output_filename):
 
-    # Prompt for output filename if not provided
+    # Auto-generate output filename if not provided
     if not output_filename:
-        default_name = f"url_{model_type}_transcript"
-        output_filename = click.prompt('Output filename (without .txt extension)', 
-                                     default=default_name)
+        output_filename = f"url_{model_type}_transcript"
+        print(f"Using output filename: {output_filename}")
 
     dotenv_path = './.env'
     pyannote_token = get_pyannote_access_token(dotenv_path)
@@ -77,16 +75,14 @@ def click_url_to_transcript(url, model_type, output_filename):
 
 
 @click.command()
-@click.option('--audio_url', type=click.STRING, 
-              prompt='Audio file URL (direct link to MP3/WAV)')
-@click.option('--source_url', type=click.STRING, 
-              prompt='Source URL (e.g., podcast page, YouTube, etc.)',
+@click.option('--audio_url', type=click.STRING, required=True,
+              help='Audio file URL (direct link to MP3/WAV)')
+@click.option('--source_url', type=click.STRING, required=True,
               help='The original source URL where this content was found')
-@click.option('--title', type=click.STRING,
-              prompt='Title for the transcript',
+@click.option('--title', type=click.STRING, required=True,
               help='Title to use in Notion and for filename')
-@click.option('--model_type', type=click.Choice(choices=WHISPER_MODELS), 
-              default='large-v3-turbo', prompt='Provide the Whisper model',
+@click.option('--model_type', type=click.Choice(choices=WHISPER_MODELS),
+              default='large-v3-turbo',
               help='Defines the model type in Whisper')
 @click.option('--skip_notion', is_flag=True, default=False,
               help='Skip uploading to Notion, just transcribe')
