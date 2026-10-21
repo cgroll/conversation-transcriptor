@@ -1,142 +1,118 @@
 # Conversation Transcriptor
 
-A Python toolkit for downloading audio files, transcribing them using Whisper with speaker diarization, and uploading transcripts to Notion.
+Transcribes podcasts and other conversations (German, English and 23 more European languages) with speaker labels, on a local NVIDIA GPU, and optionally uploads the transcript to Notion.
 
-## Quick Start (If Already Set Up)
+- **Speech recognition:** NVIDIA [Parakeet TDT 0.6B v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)
+- **Speaker diarization ("who said what"):** NVIDIA [Sortformer 4spk v2.1](https://huggingface.co/nvidia/diar_streaming_sortformer_4spk-v2.1), max. 4 speakers
 
-### How to Transcribe a Podcast from Listen Notes
+## Usage
 
-1. **Find your podcast**: Go to [Listen Notes](https://www.listennotes.com)
-2. **Search for the podcast** you want to transcribe
-3. **Get the audio URL**: Click "Download Audio" to get the direct MP3/WAV link
-4. **Copy the page URL**: Save the Listen Notes page URL for reference
-5. **Create a meaningful title**: Come up with a descriptive title for your transcript
+Run all commands from the project root. `uv run` uses the project environment in `.venv`.
 
-**Example workflow:**
+### Transcribe audio from a URL
+
 ```bash
-url_to_notion
+uv run from_url --url "https://example.com/episode.mp3" --output_filename my_episode
 ```
 
-When prompted, provide:
-- **Audio URL**: `https://content.production.cdn.art19.com/episodes/example.mp3`
-- **Source URL**: `https://www.listennotes.com/podcasts/show-name/episode-title`
-- **Title**: `Tech Talk with John Doe - AI in Healthcare`
+- `--url` must be a **direct link to the audio file** (MP3), not a podcast web page.
+- Always pass `--output_filename`. Without it, the name defaults to `url_transcript` and the previous result gets overwritten.
+- The download is saved to `data/inputs/raw/<output_filename>.mp3` and converted to `data/inputs/wav/<output_filename>.wav` (16 kHz mono).
 
-### Complete Command-Line Usage
+### Transcribe a local audio file
 
 ```bash
-# One-command transcription with all parameters
-url_to_notion \
-  --audio_url "https://example.com/podcast.mp3" \
-  --source_url "https://listennotes.com/podcasts/..." \
-  --title "My Podcast Episode"
-
-# Just transcribe locally (skip Notion upload)
-url_to_notion --skip_notion
-
-# Use different Whisper model for speed
-url_to_notion --model_type base
+uv run from_wav --wav_fname path/to/audio.wav --output_filename my_recording
 ```
 
-## Installation & Setup
-
-### 1. Install the Project
+`from_wav` only accepts **WAV** files, at any sample rate and channel count. Convert other formats (MP3, M4A, ...) with ffmpeg first:
 
 ```bash
-git clone <repository-url>
-cd conversation-transcriptor
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -e .
+ffmpeg -i audio.mp3 -ac 1 -ar 16000 audio.wav
 ```
 
-### 2. Required Environment Variables
+Use ffmpeg for this, not pydub's `set_frame_rate()`: its resampling has no anti-aliasing filter, and its output made Sortformer split one speaker into two.
 
-Create a `.env` file with these tokens:
+### Transcribe from a URL and upload to Notion
 
 ```bash
-# Required for transcription (get from HuggingFace)
-PYANNOTE_ACCESS_TOKEN=your_huggingface_token_here
+uv run url_to_notion \
+  --audio_url "https://example.com/episode.mp3" \
+  --source_url "https://www.listennotes.com/podcasts/show/episode" \
+  --title "Show - Episode title"
 
-# Required for Notion upload (get from Notion integrations)
+# same, without the Notion upload (--source_url and --title are still required)
+uv run url_to_notion --audio_url "..." --source_url "..." --title "..." --skip_notion
+```
+
+The output name is derived from the title: `<safe_title>_parakeet_from_url`. Long transcripts are split across several Notion pages. The upload needs the Notion tokens in `.env` (see Setup).
+
+A good source for direct audio links is [Listen Notes](https://www.listennotes.com): open an episode and use "Download Audio" for `--audio_url` and the page URL for `--source_url`.
+
+### Output
+
+- **Transcript:** `data/outputs/<output_filename>.txt`
+- **Intermediate CSVs** (named after the WAV file): `data/intermediate/<wav_name>_parakeet_segments.csv` (text segments: id, start, end, text) and `data/intermediate/<wav_name>_sortformer_speaker_segments.csv` (speaker turns: start, end, speaker)
+
+The transcript merges consecutive segments of the same speaker. Times are in seconds:
+
+```
+4.24 - 6.96: SPEAKER_01
+Herzlich willkommen. Mein Name ist ...
+
+7.12 - 8.24: SPEAKER_00
+Und ich bin ...
+```
+
+Speakers are labelled `SPEAKER_00` ... `SPEAKER_03` in order of first appearance. They are not mapped to names.
+
+### Runtime and GPU
+
+- **Speed:** A 74 minute podcast takes about 1.5 minutes on an RTX 3070 Laptop GPU (8 GB), including ~30-60 s of model loading. Expect about half the speed when the laptop runs on battery. Each run prints a processing summary at the end.
+- **GPU memory:** A run needs about 5.5 GB of free VRAM. A CUDA out-of-memory error usually means another process is holding GPU memory; check with `nvidia-smi`. There is no CPU fallback.
+- **First run:** The first run downloads both models (~3 GB) to `~/.cache/huggingface`.
+- **Long files:** Parakeet transcribes long files in ~5 minute chunks, cut at the quietest moment nearby, so that it fits into 8 GB VRAM. Sortformer runs in one pass over the whole file, so speaker labels stay consistent across chunks.
+
+## Setup
+
+```bash
+uv sync
+```
+
+Requirements:
+- Python 3.10+
+- an NVIDIA GPU with a CUDA 13 capable driver
+- `ffmpeg` (`sudo apt install ffmpeg`)
+
+Transcription needs no tokens. The Notion upload needs a `.env` file in the project root:
+
+```bash
 NOTION_WRITE_API_TOKEN=your_notion_integration_token_here
 NOTION_TRANSCRIPTS_DATABASE_ID=your_notion_database_id_here
 ```
 
-**Getting tokens:**
-- **HuggingFace Token**: Visit [HuggingFace](https://huggingface.co), create account, generate token, accept pyannote/speaker-diarization terms
-- **Notion Token**: Create integration at [Notion Developers](https://developers.notion.com), share database with integration
+To get the token, create an integration at [Notion Developers](https://developers.notion.com) and share the database with it.
 
-### 3. System Requirements
+## Code Overview
 
-- **Python 3.8+**
-- **FFmpeg** (for audio processing):
-  - Ubuntu/Debian: `sudo apt install ffmpeg`
-  - macOS: `brew install ffmpeg`  
-  - Windows: Download from [ffmpeg.org](https://ffmpeg.org)
-
-## What This Project Does
-
-The Conversation Transcriptor combines two AI models to create detailed transcripts:
-
-### 🧠 **Two-Step AI Process**
-1. **Speech Recognition**: OpenAI's Whisper extracts text with precise timing
-2. **Speaker Diarization**: Pyannote identifies different speakers ("who said what")
-3. **Smart Combination**: Matches text segments with speakers
-4. **Auto-Upload**: Creates organized Notion pages with metadata
-
-### 📊 **Features**
-- 🎵 Download audio from any URL
-- 🗣️ Identify different speakers automatically  
-- 📝 Generate timestamped transcripts
-- 📚 **Multi-part uploads** - automatically splits long transcripts across multiple Notion pages
-- 🔗 Link back to original sources
-- 📅 Automatic date tagging
-
-### 🏗️ **File Organization**
 ```
-data/
-├── inputs/
-│   ├── raw/         # Downloaded MP3 files
-│   └── wav/         # Converted WAV files  
-├── outputs/         # Final transcript files
-└── intermediate/    # Processing data (CSV)
+click_app.py                          CLI commands (from_wav, from_url, url_to_notion)
+convscript/
+├── conversation_transcription.py     pipeline: wav_to_transcript(), url_to_transcript(), speaker/text merging
+├── model_parakeet.py                 speech recognition (chunked)
+├── model_sortformer.py               speaker diarization
+├── audio_utils.py                    download, MP3 -> 16 kHz mono WAV (ffmpeg)
+└── notion.py                         Notion upload
+data/                                 inputs/raw, inputs/wav, intermediate, outputs (git-ignored)
 ```
-
-## Alternative Commands
-
-### Other Available Commands
-
-```bash
-# Transcribe from URL (no Notion upload)
-from_url
-
-# Transcribe local audio file
-from_wav
-
-# Legacy direct commands
-python click_app.py click-wav-to-transcript --wav_fname audio.wav
-python click_app.py click-url-to-transcript --url "https://example.com/audio.mp3"
-```
-
-### Available Whisper Models
-
-Choose based on your speed vs accuracy needs:
-- `tiny`, `tiny.en` - Fastest, least accurate
-- `base`, `base.en` - Good for quick transcripts  
-- `small`, `small.en` - Balanced option
-- `medium`, `medium.en` - Good accuracy
-- `large-v1`, `large-v2`, `large` - High accuracy
-- `large-v3-turbo` - **Recommended** - Best balance of speed and accuracy
 
 ## Future Ideas
 
-- Extend to other formats (e.g. m4a)
-- Allow YouTube Video transcription
-- Use faster whisper to increase performance speed
-- Use uv instead of pip
+- Accept other audio formats (MP3, M4A) directly in `from_wav`
+- Allow YouTube video transcription
+- Assign speakers per word (Parakeet provides word timestamps) instead of per sentence segment
 - Allow re-naming of speakers (e.g. SPEAKER_00 to "Barack Obama")
-- Connect to Instapaper: -> skipped. It would require the full API which one can only use after one has registered an official app with instapaper
+- Connect to Instapaper: skipped, because it requires the full API, which is only available after registering an official app with Instapaper
 
 ## License
 

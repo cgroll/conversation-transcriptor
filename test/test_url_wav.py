@@ -1,13 +1,10 @@
 import pytest
 import os.path
 import os
-from dotenv import load_dotenv
-from pyannote.audio import Pipeline
-from convscript.model_whisper import whisper_inference_with_segments_df
+from convscript.model_parakeet import parakeet_inference_df
+from convscript.model_sortformer import sortformer_inference_df
 from convscript.audio_utils import download_mp3, \
     transform_mp3_to_wav, crop_wav
-from convscript.path import ProjPaths
-from convscript.model_pyannote import pyannote_inference_df
 
 @pytest.fixture(scope='session', autouse=True)
 def test_download_transform_and_crop():
@@ -36,22 +33,18 @@ def test_download_transform_and_crop():
     os.remove(test_wav_path)
     
 
-def test_whisper(test_download_transform_and_crop):
+def test_parakeet(test_download_transform_and_crop):
     
     test_file_path = test_download_transform_and_crop
     
-    text_df = whisper_inference_with_segments_df(test_file_path, model_type='base')
+    text_df = parakeet_inference_df(test_file_path)
     print(text_df)
     
-def test_pyannote(test_download_transform_and_crop):
+def test_sortformer(test_download_transform_and_crop):
     
     test_file_path = test_download_transform_and_crop
     
-    dotenv_path = ProjPaths.env_variables_path
-    load_dotenv(dotenv_path)
-    pyannote_token = os.environ.get('PYANNOTE_ACCESS_TOKEN')
-    
-    speaker_df = pyannote_inference_df(test_file_path, pyannote_token)
+    speaker_df = sortformer_inference_df(test_file_path)
     print(speaker_df)
     
     
@@ -59,13 +52,7 @@ def wav_to_transcript(test_download_transform_and_crop):
     
     test_file_path = test_download_transform_and_crop
 
-    dotenv_path = ProjPaths.env_variables_path    
-    load_dotenv(dotenv_path)
-    pyannote_token = os.environ.get('PYANNOTE_ACCESS_TOKEN')
-    
-    model_type='base'
-    
-    output_str = wav_to_transcript(test_file_path, model_type, pyannote_token)
+    output_str = wav_to_transcript(test_file_path)
     
     print(output_str)
 

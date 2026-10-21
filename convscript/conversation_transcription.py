@@ -4,11 +4,11 @@ import time
 import os
 
 from convscript.audio_utils import download_mp3, transform_mp3_to_wav, crop_wav
-from convscript.model_whisper import whisper_inference_with_segments_df
-from convscript.model_pyannote import get_pyannote_access_token, pyannote_inference_df
+from convscript.model_parakeet import parakeet_inference_df, PARAKEET_MODEL
+from convscript.model_sortformer import sortformer_inference_df, SORTFORMER_MODEL
 from convscript.path import ProjPaths
 
-def combine_whisper_and_pyannote(text_df, speaker_df):
+def combine_text_and_speakers(text_df, speaker_df):
     
     # find overlapping speakers for each text segment
     overlap_list = []
@@ -96,24 +96,24 @@ def text_speaker_df_to_text(text_speaker_df):
         
     return output_str
 
-def save_intermediate_csvs(text_df, speaker_df, wav_fname, model_type):
+def save_intermediate_csvs(text_df, speaker_df, wav_fname):
     """Save intermediate DataFrames as CSV files"""
     # Ensure directories exist
     ProjPaths.create_directories()
     
     base_name = os.path.splitext(os.path.basename(wav_fname))[0]
     
-    # Save whisper segments
-    whisper_csv = ProjPaths.intermediate_path / f"{base_name}_whisper_{model_type}_segments.csv"
-    text_df.to_csv(whisper_csv, index=False, encoding='utf-8')
+    # Save parakeet segments
+    text_csv = ProjPaths.intermediate_path / f"{base_name}_parakeet_segments.csv"
+    text_df.to_csv(text_csv, index=False, encoding='utf-8')
     
     # Save speaker segments
-    speaker_csv = ProjPaths.intermediate_path / f"{base_name}_speaker_segments.csv"
+    speaker_csv = ProjPaths.intermediate_path / f"{base_name}_sortformer_speaker_segments.csv"
     speaker_df.to_csv(speaker_csv, index=False, encoding='utf-8')
     
-    return whisper_csv, speaker_csv
+    return text_csv, speaker_csv
 
-def save_final_transcript(output_str, output_filename=None, wav_fname=None, model_type=None):
+def save_final_transcript(output_str, output_filename=None, wav_fname=None):
     """Save final transcript to outputs folder"""
     # Ensure directories exist
     ProjPaths.create_directories()
@@ -122,7 +122,7 @@ def save_final_transcript(output_str, output_filename=None, wav_fname=None, mode
         output_file = ProjPaths.outputs_path / f"{output_filename}.txt"
     else:
         base_name = os.path.splitext(os.path.basename(wav_fname))[0]
-        output_file = ProjPaths.outputs_path / f"{base_name}_{model_type}_transcript.txt"
+        output_file = ProjPaths.outputs_path / f"{base_name}_transcript.txt"
     
     with open(output_file, 'w', encoding='utf-8') as f:
         f.write(output_str)
@@ -156,7 +156,7 @@ def detect_device():
     except ImportError:
         return "CPU (torch not available)"
 
-def wav_to_transcript(wav_fname, model_type, pyannote_token, output_filename=None):
+def wav_to_transcript(wav_fname, output_filename=None):
     
     # Display device information
     device_info = detect_device()
@@ -166,44 +166,43 @@ def wav_to_transcript(wav_fname, model_type, pyannote_token, output_filename=Non
     audio_duration = get_audio_duration(wav_fname)
     print(f"Audio duration: {audio_duration:.2f} seconds ({audio_duration/60:.2f} minutes)")
     
-    # Step 1: Whisper inference
-    print(f"Starting Whisper inference with model: {model_type}")
-    whisper_start = time.time()
-    text_df = whisper_inference_with_segments_df(wav_fname, model_type=model_type)
-    text_df = text_df.reset_index()
-    whisper_time = time.time() - whisper_start
-    print(f"Whisper inference complete. Found {len(text_df)} segments")
+    # Step 1: Speech recognition
+    print(f"Starting speech recognition with {PARAKEET_MODEL}")
+    asr_start = time.time()
+    text_df = parakeet_inference_df(wav_fname)
+    asr_time = time.time() - asr_start
+    print(f"Speech recognition complete. Found {len(text_df)} segments")
     
     # Step 2: Speaker diarization
-    print("Starting speaker diarization with pyannote")
-    pyannote_start = time.time()
-    speaker_df = pyannote_inference_df(wav_fname, pyannote_token)
-    pyannote_time = time.time() - pyannote_start
+    print(f"Starting speaker diarization with {SORTFORMER_MODEL}")
+    diarization_start = time.time()
+    speaker_df = sortformer_inference_df(wav_fname)
+    diarization_time = time.time() - diarization_start
     print(f'Speaker diarization done. Found {len(speaker_df)} speaker segments')
     
     # Step 3: Combining results
-    print("Combining Whisper and pyannote results")
+    print("Combining transcript and speaker segments")
     combine_start = time.time()
-    text_speaker_df_raw = combine_whisper_and_pyannote(text_df, speaker_df)    
+    text_speaker_df_raw = combine_text_and_speakers(text_df, speaker_df)    
     text_speaker_df = combine_consecutive_speakers(text_speaker_df_raw)
     output_str = text_speaker_df_to_text(text_speaker_df)
     combine_time = time.time() - combine_start
     print(f"Combination complete. Final transcript has {len(text_speaker_df)} segments")
     
     # Save intermediate CSVs
-    save_intermediate_csvs(text_df, speaker_df, wav_fname, model_type)
+    save_intermediate_csvs(text_df, speaker_df, wav_fname)
     
     # Save final transcript
-    output_file = save_final_transcript(output_str, output_filename, wav_fname, model_type)
+    output_file = save_final_transcript(output_str, output_filename, wav_fname)
     
     # Display timing and statistics
-    total_time = whisper_time + pyannote_time + combine_time
+    total_time = asr_time + diarization_time + combine_time
     print(f"\\n=== PROCESSING SUMMARY ===")
     print(f"Processing device: {device_info}")
     print(f"Audio duration: {audio_duration:.2f} seconds")
     print(f"Final transcript length: {len(output_str):,} characters")
-    print(f"Whisper inference: {whisper_time:.1f}s")
-    print(f"Speaker diarization: {pyannote_time:.1f}s") 
+    print(f"Speech recognition: {asr_time:.1f}s")
+    print(f"Speaker diarization: {diarization_time:.1f}s") 
     print(f"Combination: {combine_time:.1f}s")
     print(f"Total processing time: {total_time:.1f}s")
     print(f"Processing speed: {audio_duration/total_time:.1f}x realtime")
@@ -211,7 +210,7 @@ def wav_to_transcript(wav_fname, model_type, pyannote_token, output_filename=Non
     
     return output_str
 
-def url_to_transcript(url, model_type, pyannote_token, output_filename=None):
+def url_to_transcript(url, output_filename=None):
 
     ## download file, transform to wav
     mp3_fname = download_mp3(url)
@@ -219,21 +218,13 @@ def url_to_transcript(url, model_type, pyannote_token, output_filename=None):
     print('TODO: remove file cropping in url_to_transcript')
     crop_wav(wav_fname, wav_fname, start_frame=100000, n_frames=60000)
     
-    return wav_to_transcript(wav_fname, model_type, pyannote_token, output_filename)
+    return wav_to_transcript(wav_fname, output_filename)
 
 
 if __name__ == '__main__':
     
-    import os
-    from dotenv import load_dotenv
-    from convscript.path import ProjPaths
-
-    dotenv_path = ProjPaths.env_variables_path
-    load_dotenv(dotenv_path)
-    pyannote_token = os.environ.get('PYANNOTE_ACCESS_TOKEN')
-
     test_url = 'https://chtbl.com/track/736CG3/pdst.fm/e/stitcher.simplecastaudio.com/2be48404-a43c-4fa8-a32c-760a3216272e/episodes/413d1340-d75e-46ae-956c-3785e2b359b2/audio/128/default.mp3?aid=rss_feed&amp;awCollectionId=2be48404-a43c-4fa8-a32c-760a3216272e&amp;awEpisodeId=413d1340-d75e-46ae-956c-3785e2b359b2&amp;feed=Y8lFbOT4'
     
-    output_str = url_to_transcript(test_url, 'base', pyannote_token)
+    output_str = url_to_transcript(test_url)
     output_str
     

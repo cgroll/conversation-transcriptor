@@ -1,7 +1,7 @@
 [project]
 name = "convscript"
 version = "0.1.0"
-description = "Some speech-to-text python experiments"
+description = "Podcast transcription with speaker diarization (Parakeet + Sortformer)"
 authors = [
     {name = "Christian Groll"}
 ]
@@ -9,11 +9,13 @@ license = {text = "MIT"}
 requires-python = ">=3.10,<3.11"
 dependencies = [
     "pyaudio",
-    "openai-whisper @ git+https://github.com/openai/whisper.git",
     "pydub",
     "pandas",
     "python-dotenv",
-    "pyannote-audio",
+    "nemo_toolkit[asr]>=2.5",
+    "soundfile",
+    # torch < 2.14 cannot load the Sortformer checkpoint with weights_only=True
+    "torch>=2.14",
     "click",
     "pytest",
     "requests",

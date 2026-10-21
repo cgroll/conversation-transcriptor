@@ -1,5 +1,6 @@
 # %%
 import requests
+import subprocess
 import tempfile
 from pydub import AudioSegment
 
@@ -62,19 +63,21 @@ def download_mp3(audio_url, fname=None):
     return this_temp_file_name
 
 def transform_mp3_to_wav(mp3_fname, output_fname=None):
-        
-    sound = AudioSegment.from_mp3(mp3_fname) # load source
 
     if output_fname:
         this_temp_file_name = output_fname
-        sound.export(output_fname, format="wav")
 
     else:
         # create temp file
         temp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
         this_temp_file_name = temp_file.name
 
-        sound.export(this_temp_file_name, format="wav")
+    # Parakeet and Sortformer both expect 16 kHz mono. Resample with ffmpeg:
+    # pydub's set_frame_rate() has no anti-aliasing filter, and its output made
+    # Sortformer split one speaker into two.
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", str(mp3_fname),
+                    "-ac", "1", "-ar", "16000", str(this_temp_file_name)],
+                   check=True)
 
     return this_temp_file_name
 
